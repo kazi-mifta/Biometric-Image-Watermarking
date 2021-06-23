@@ -1,7 +1,12 @@
 function WaterMark = ExtractBack(parentImg)
 % Reading Source Iamge and Flattening the Array
 source = imread(parentImg);
-%source = imnoise(source,'salt & pepper',0.005);
+[w,h,c] = size(source);
+if c > 1
+    source = rgb2gray(source);
+end
+figure,imshow(source);
+%source = imnoise(source,'salt & pepper',0.01);
 flattenSource = source(:);
 orig = source;
 
@@ -73,84 +78,61 @@ end
 waterMark = reshape(waterMark,64,64);
 figure;imshow(waterMark);
 
-% Extracting the Fragile Watermark from ROI
-recoveredSign = zeros(size(180,120));
-for row = 191:370
-	for column = 201:320
-        recoveredSign(row-190,column-200) = bitget(orig(row,column), 1);
-	end
+ 
+% initializing watermark array for extracting the watermark
+EyeHashBinary = zeros(size(1,256));
+NoseHashBinary = zeros(size(1,256));
+MouthHashBinary = zeros(size(1,256));
+ 
+for colNo = 1 : 1 : 256
+    EyeHashBinary(1,colNo) = bitget(source(1,colNo),1);
+    NoseHashBinary(1,colNo) = bitget(source(1,256 + colNo),1);
+    MouthHashBinary(1,colNo) = bitget(source(512,colNo),1);
 end
-figure;imshow(recoveredSign);
+ 
+EyeHash = char(bin2dec(reshape(char(EyeHashBinary+'0'), 8,[]).'));
+NoseHash = char(bin2dec(reshape(char(NoseHashBinary+'0'), 8,[]).'));
+MouthHash = char(bin2dec(reshape(char(MouthHashBinary+'0'), 8,[]).'));
+ 
+EyeHash = convertCharsToStrings(EyeHash);
+NoseHash = convertCharsToStrings(NoseHash);
+MouthHash = convertCharsToStrings(MouthHash)
+ 
+%To detect Eye,Nose,Mouth
+EyeDetector = vision.CascadeObjectDetector('EyePairBig');
+NoseDetector = vision.CascadeObjectDetector('Nose','MergeThreshold',4); 
+MouthDetector = vision.CascadeObjectDetector('Mouth','MergeThreshold',4); 
+%detecting Bounding Box of Eye,Nose,Mouth
+EyeBB = step(EyeDetector,source);
+NoseBB = step(NoseDetector,source);
+MouthBB = step(MouthDetector,source);
+size(EyeBB)
+size(NoseBB)
+size(MouthBB)
+% Cropping the Bounding Region from Main Image
+Eye = imcrop(source,EyeBB);
+Nose = imcrop(source,NoseBB(2,:));
+Mouth = imcrop(source,MouthBB(2,:));
+ 
+% Hash Generation
+EyeHashSec = generateHashFromImage(Eye);
+NoseHashSec = generateHashFromImage(Nose);
+MouthHashSec = generateHashFromImage(Mouth)
 
+figure,imshow(source);
+if EyeHash ~= EyeHashSec
+    rectangle('Position',EyeBB,'LineWidth',4,'LineStyle','-','EdgeColor','r');
+end
+if NoseHash ~= NoseHashSec
+    rectangle('Position',NoseBB(2,:),'LineWidth',4,'LineStyle','-','EdgeColor','r');
+end
+if MouthHash ~= MouthHashSec
+    rectangle('Position',MouthBB(2,:),'LineWidth',4,'LineStyle','-','EdgeColor','r');
+end
 
+% Comparison
 origWaterMark = imbinarize(imread("left_index.jpeg"));
 nc = corr2(origWaterMark,waterMark)
 psnr = PSNR(origWaterMark,waterMark)
 [val,map] = SSIM(waterMark,origWaterMark);
 ber = Biter(origWaterMark,waterMark)
-
-origSign = imbinarize(rgb2gray(imread("signature.png")));
-[val,map]=SSIM(recoveredSign,origSign);
-% Tamper Check
-if val < 1
-   % Tampered Area is Being painted White
-    for row = 191:370
-        for column = 201:320
-            if (map(row-190,column-200) < 1.0)
-                orig(row,column) = 255;
-            end
-        end
-    end
-
-    % ROI extraction in case tamper detected
-    row = 1;
-    col = 1;
-    rowZip = 1;
-    colZip = 1;
-    counter = 1
-    zipBinRoi = zeros(size(16199,8));
-    for itrRow = 1:512
-        for itrCol = 1:512
-            if (col < 201 || col > 320) || (row < 191 || row > 370)
-                 if counter <= (16199*8)
-                    zipBinRoi(rowZip,colZip) = bitget(orig(row,col), 1);
-                    counter = counter + 1;
-                 end
-                 colZip = colZip + 1;
-                 if(colZip > 8)
-                    colZip = 1;
-                    rowZip = rowZip + 1;
-                    if(rowZip > 16199)
-                        rowZip = 1;
-                    end
-                 end
-            else
-            end
-        % Iteration 
-        col = col + 1;
-        if(col > 512)
-            col = 1;
-            row = row + 1;
-            if(row > 512)
-                row = 1;
-            end
-        end
-        end
-    end
-
-    figure;imshow(orig);
-    charZipBin = num2str(zipBinRoi(1:16199,:));
-    charZipBin(1000:1003,:)
-    zipped = zeros(size(1,16199));
-
-    for loop = 1:16199
-        str = charZipBin(loop,:);
-        newStr = regexprep(str, '\s+', '');
-        zipped(1,loop) = bin2dec(newStr);
-    end
-    zipped = uint8(zipped);
-
-    unzipped = zmat(zipped,0,'lzma'); % Uncompressing ROI
-    ROI = reshape(unzipped,181,121);
-    figure;imshow(ROI); 
-end

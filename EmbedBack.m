@@ -1,6 +1,12 @@
 function WaterMark = EmbedBack(parentImg,childImg,signImage)
 % Reading Source Iamge and Flattening the Array
 source = imread(parentImg);
+
+[w,h,c] = size(source);
+if c > 1
+    source = rgb2gray(source);
+end
+
 flattenSource = source(:);
 orig = source;
 
@@ -54,7 +60,7 @@ for blockNo = 1 : 1 : 4096
     end
     
      if(blockNo == 2048)
-         backDiagonal
+         %backDiagonal
 %         figure;imshow(uint8(abs(block)));
      end
     
@@ -79,7 +85,7 @@ for blockNo = 1 : 1 : 4096
     block = complex(realBlock,imaginaryBlock);
     
      if(blockNo == 2048)
-         result
+         %result
 %         figure;imshow(uint8(abs(block)));
      end
     
@@ -110,64 +116,37 @@ flattenSourceOriginal(sortIndexes) = flattenSortedSource;
 % Reshaping the Image to original Size
 flattenSourceOriginalReshaped = reshape(flattenSourceOriginal,512,512);
 
-
-
-%_______________________Tamper Recovery________________________
-% Embedding ROI in RONI for emergency Recovery
-ROI = imcrop(flattenSourceOriginalReshaped,[200 190 120 180]);
-figure;imshow(ROI);
-ROI = ROI(:); % flattenning ROI
-[zipROI,info] = zmat(ROI,1,'lzma');% Compressing ROI
-zipBinRoi = dec2bin(zipROI);% converting Decimal to Binary(Char Array)
-zipBinRoi = logical(zipBinRoi'-'0');% converting Decimal to Binary(logical Array)
-zipBinRoi = transpose(zipBinRoi);
-
-
-row = 1;
-col = 1;
-rowZip = 1;
-colZip = 1;
-counter = 1
-for itrRow = 1:512
-    for itrCol = 1:512
-        if (col < 201 || col > 320) || (row < 191 || row > 370)
-             if counter <= (16199*8)
-                flattenSourceOriginalReshaped(row,col) = bitset(flattenSourceOriginalReshaped(row,col), 1, zipBinRoi(rowZip,colZip));
-                counter = counter + 1;
-             end
-             colZip = colZip + 1;
-             if(colZip > 8)
-                colZip = 1;
-                rowZip = rowZip + 1;
-                if(rowZip > 16199)
-                    rowZip = 1;
-                end
-             end
-        else
-        end
-    % Iteration 
-    col = col + 1;
-    if(col > 512)
-        col = 1;
-        row = row + 1;
-        if(row > 512)
-            row = 1;
-        end
-    end
-    end
-end
-
 %_______________________Tamper Detection________________________
-% Reading fragile Watermark, Binarizing and Flattening the Array
-signature = imread(signImage);
-signature = rgb2gray(signature);
-binarySignature = imbinarize(signature);
-figure;imshow(binarySignature);
-% embedding fragile watermark in ROI
-for row = 191:370
-	for column = 201:320
-        flattenSourceOriginalReshaped(row,column) = bitset(flattenSourceOriginalReshaped(row,column), 1, binarySignature(row-190,column-200));
-	end
+ 
+%To detect Eye,Nose,Mouth
+EyeDetector = vision.CascadeObjectDetector('EyePairBig');
+NoseDetector = vision.CascadeObjectDetector('Nose','MergeThreshold',4); 
+MouthDetector = vision.CascadeObjectDetector('Mouth','MergeThreshold',4); 
+%detecting Bounding Box of Eye,Nose,Mouth
+EyeBB = step(EyeDetector,flattenSourceOriginalReshaped);
+NoseBB = step(NoseDetector,flattenSourceOriginalReshaped);
+MouthBB = step(MouthDetector,flattenSourceOriginalReshaped);
+% Cropping the Bounding Region from Main Image
+Eye = imcrop(flattenSourceOriginalReshaped,EyeBB(1,:));
+Nose = imcrop(flattenSourceOriginalReshaped,NoseBB(2,:));
+Mouth = imcrop(flattenSourceOriginalReshaped,MouthBB(2,:));
+ 
+% Hash Generation
+EyeHash = generateHashFromImage(Eye)
+NoseHash = generateHashFromImage(Nose)
+MouthHash = generateHashFromImage(Mouth)
+% Converting Hash to Bibary
+EyeHashBinary = reshape(dec2bin(EyeHash, 8).'-'0',1,[]);
+NoseHashBinary = reshape(dec2bin(NoseHash, 8).'-'0',1,[]);
+MouthHashBinary = reshape(dec2bin(MouthHash, 8).'-'0',1,[]);
+ 
+for colNo = 1 : 1 : 256
+    % Embedding EyeHash to First Row from 1 to 256th column
+    flattenSourceOriginalReshaped(1,colNo) = bitset(flattenSourceOriginalReshaped(1,colNo),1,EyeHashBinary(1,colNo));
+    % Embedding NoseHash to First Row from 256th to 512th column
+    flattenSourceOriginalReshaped(1,256 + colNo) = bitset(flattenSourceOriginalReshaped(1,256 + colNo),1,NoseHashBinary(1,colNo));
+    % Embedding MouthHash to Last Row from 1th to 256th column
+    flattenSourceOriginalReshaped(512,colNo) = bitset(flattenSourceOriginalReshaped(512,colNo),1,MouthHashBinary(1,colNo));
 end
 
 % Saving the Watermarked Image
@@ -178,11 +157,12 @@ fprintf(fileID,'%d\n',sortIndexes);
 % Saving random Array
 fileID = fopen('randomInts.txt','w');
 fprintf(fileID,'%d\n',k);
-writestruct(info,"zipInfo.xml")
+
 %determining PSNR
 psnr = PSNR(orig,flattenSourceOriginalReshaped)
 ber = Biter(orig,flattenSourceOriginalReshaped)
 
+figure;imshow(flattenSourceOriginalReshaped);
 %hash = reshape(dec2bin(hash, 8).'-'0',1,[]);
-        %hash = char(bin2dec(reshape(char(hash+'0'), 8,[]).'))
-        %hash = convertCharsToStrings(hash);
+%hash = char(bin2dec(reshape(char(hash+'0'), 8,[]).'))
+%hash = convertCharsToStrings(hash);
