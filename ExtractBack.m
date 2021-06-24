@@ -24,8 +24,6 @@ sortedSource = flattenSource(sortIndexes);
 % Reshaping
 reshapedSortedSource = reshape(sortedSource,512,512);
 
-figure;imshow(reshapedSortedSource);
-
 blockSize = 8;
 row = 1;
 col = 1;
@@ -78,57 +76,51 @@ end
 waterMark = reshape(waterMark,64,64);
 figure;imshow(waterMark);
 
- 
-% initializing watermark array for extracting the watermark
-EyeHashBinary = zeros(size(1,256));
-NoseHashBinary = zeros(size(1,256));
-MouthHashBinary = zeros(size(1,256));
- 
-for colNo = 1 : 1 : 256
-    EyeHashBinary(1,colNo) = bitget(source(1,colNo),1);
-    NoseHashBinary(1,colNo) = bitget(source(1,256 + colNo),1);
-    MouthHashBinary(1,colNo) = bitget(source(512,colNo),1);
+
+% Tamepr Detect And Localize
+blockSize = 4;
+row = 1;
+col = 1;
+
+meanValEx = zeros(1,8);
+
+for blockNo = 1 : 1 : 16384
+
+    % % calculate mean value of upper 4x2 block
+    block = source(row:row+blockSize-1,col:col+blockSize-1);
+
+    upperHalf = block(1:2,1:4);
+    lowerHalf = block(3:4,1:4);
+    
+    meanVal = uint8(mean(upperHalf,"all"));
+
+    % Getting Mean Value
+    itr = 1;
+    for i = 1 : 1 : 2
+        for j = 1 : 1 : 4
+            meanValEx(1,itr) = bitget(lowerHalf(i,j),1); % Embedding in LSB
+            itr = itr + 1;
+        end
+    end
+
+    % if the value doesn't match then turn that block into White
+    if meanVal ~= bi2de(meanValEx)
+        block(:,:) =  255;
+        source(row:row+blockSize-1,col:col+blockSize-1) = block;
+    end
+
+     % Iteration 
+    col = col + blockSize;
+    if(col >= size(source,2))
+        col = 1;
+        row = row + blockSize;
+        if(row >= size(source,1))
+            row = 1;
+        end
+    end
 end
- 
-EyeHash = char(bin2dec(reshape(char(EyeHashBinary+'0'), 8,[]).'));
-NoseHash = char(bin2dec(reshape(char(NoseHashBinary+'0'), 8,[]).'));
-MouthHash = char(bin2dec(reshape(char(MouthHashBinary+'0'), 8,[]).'));
- 
-EyeHash = convertCharsToStrings(EyeHash);
-NoseHash = convertCharsToStrings(NoseHash);
-MouthHash = convertCharsToStrings(MouthHash)
- 
-%To detect Eye,Nose,Mouth
-EyeDetector = vision.CascadeObjectDetector('EyePairBig');
-NoseDetector = vision.CascadeObjectDetector('Nose','MergeThreshold',4); 
-MouthDetector = vision.CascadeObjectDetector('Mouth','MergeThreshold',4); 
-%detecting Bounding Box of Eye,Nose,Mouth
-EyeBB = step(EyeDetector,source);
-NoseBB = step(NoseDetector,source);
-MouthBB = step(MouthDetector,source);
-size(EyeBB)
-size(NoseBB)
-size(MouthBB)
-% Cropping the Bounding Region from Main Image
-Eye = imcrop(source,EyeBB);
-Nose = imcrop(source,NoseBB(2,:));
-Mouth = imcrop(source,MouthBB(2,:));
- 
-% Hash Generation
-EyeHashSec = generateHashFromImage(Eye);
-NoseHashSec = generateHashFromImage(Nose);
-MouthHashSec = generateHashFromImage(Mouth)
 
 figure,imshow(source);
-if EyeHash ~= EyeHashSec
-    rectangle('Position',EyeBB,'LineWidth',4,'LineStyle','-','EdgeColor','r');
-end
-if NoseHash ~= NoseHashSec
-    rectangle('Position',NoseBB(2,:),'LineWidth',4,'LineStyle','-','EdgeColor','r');
-end
-if MouthHash ~= MouthHashSec
-    rectangle('Position',MouthBB(2,:),'LineWidth',4,'LineStyle','-','EdgeColor','r');
-end
 
 % Comparison
 origWaterMark = imbinarize(imread("left_index.jpeg"));

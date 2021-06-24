@@ -117,36 +117,44 @@ flattenSourceOriginal(sortIndexes) = flattenSortedSource;
 flattenSourceOriginalReshaped = reshape(flattenSourceOriginal,512,512);
 
 %_______________________Tamper Detection________________________
- 
-%To detect Eye,Nose,Mouth
-EyeDetector = vision.CascadeObjectDetector('EyePairBig');
-NoseDetector = vision.CascadeObjectDetector('Nose','MergeThreshold',4); 
-MouthDetector = vision.CascadeObjectDetector('Mouth','MergeThreshold',4); 
-%detecting Bounding Box of Eye,Nose,Mouth
-EyeBB = step(EyeDetector,flattenSourceOriginalReshaped);
-NoseBB = step(NoseDetector,flattenSourceOriginalReshaped);
-MouthBB = step(MouthDetector,flattenSourceOriginalReshaped);
-% Cropping the Bounding Region from Main Image
-Eye = imcrop(flattenSourceOriginalReshaped,EyeBB(1,:));
-Nose = imcrop(flattenSourceOriginalReshaped,NoseBB(2,:));
-Mouth = imcrop(flattenSourceOriginalReshaped,MouthBB(2,:));
- 
-% Hash Generation
-EyeHash = generateHashFromImage(Eye)
-NoseHash = generateHashFromImage(Nose)
-MouthHash = generateHashFromImage(Mouth)
-% Converting Hash to Bibary
-EyeHashBinary = reshape(dec2bin(EyeHash, 8).'-'0',1,[]);
-NoseHashBinary = reshape(dec2bin(NoseHash, 8).'-'0',1,[]);
-MouthHashBinary = reshape(dec2bin(MouthHash, 8).'-'0',1,[]);
- 
-for colNo = 1 : 1 : 256
-    % Embedding EyeHash to First Row from 1 to 256th column
-    flattenSourceOriginalReshaped(1,colNo) = bitset(flattenSourceOriginalReshaped(1,colNo),1,EyeHashBinary(1,colNo));
-    % Embedding NoseHash to First Row from 256th to 512th column
-    flattenSourceOriginalReshaped(1,256 + colNo) = bitset(flattenSourceOriginalReshaped(1,256 + colNo),1,NoseHashBinary(1,colNo));
-    % Embedding MouthHash to Last Row from 1th to 256th column
-    flattenSourceOriginalReshaped(512,colNo) = bitset(flattenSourceOriginalReshaped(512,colNo),1,MouthHashBinary(1,colNo));
+blockSize = 4;
+row = 1;
+col = 1;
+
+ for blockNo = 1 : 1 : 16384
+
+    % % calculate mean value of upper 4x2 block
+    block = flattenSourceOriginalReshaped(row:row+blockSize-1,col:col+blockSize-1);
+    
+    upperHalf = block(1:2,1:4);
+    lowerHalf = block(3:4,1:4);
+    
+    meanVal = uint8(mean(upperHalf,"all"));
+    % convert mean value to binary
+    binaryMean = de2bi(meanVal,8);
+
+    % embed in lower half
+    itr = 1;
+    for i = 1 : 1 : 2
+        for j = 1 : 1 : 4
+            lowerHalf(i,j) = bitset(lowerHalf(i,j),1,binaryMean(itr)); % Embedding in LSB
+            itr = itr + 1;
+        end
+    end
+
+    % Replacing The Block in Watermarked Imaeg
+    block(3:4,1:4) = lowerHalf;
+    flattenSourceOriginalReshaped(row:row+blockSize-1,col:col+blockSize-1) = block;
+
+    % Iteration 
+    col = col + blockSize;
+    if(col >= size(source,2))
+        col = 1;
+        row = row + blockSize;
+        if(row >= size(source,1))
+            row = 1;
+        end
+    end
 end
 
 % Saving the Watermarked Image
